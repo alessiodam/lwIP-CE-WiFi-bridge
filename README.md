@@ -7,13 +7,17 @@ for setup and flashing.
 
 ## Building
 
-The firmware shares `src/wireless/wifi_proto.h` with lwIP-CE and builds from
-its `wifi_bridge` submodule:
+The firmware shares `src/wireless/wifi_proto.h` with lwIP-CE. Clone this
+repo next to an lwIP-CE checkout:
 
 ```sh
-git clone --recurse-submodules https://github.com/cagscalclabs/lwip-ce.git
-idf.py -C lwip-ce/wifi_bridge set-target esp32s3 build
+git clone https://github.com/cagscalclabs/lwip-ce.git
+git clone https://github.com/alessiodam/lwIP-CE-WiFi-bridge.git lwip-ce-wifi-bridge
+idf.py -C lwip-ce-wifi-bridge set-target esp32s3 build
 ```
+
+It also builds as lwIP-CE's `wifi_bridge` submodule
+(`idf.py -C lwip-ce/wifi_bridge build`).
 
 ESP-IDF and lwIP-CE versions used by CI are pinned in `.github/ci-versions.env`.
 

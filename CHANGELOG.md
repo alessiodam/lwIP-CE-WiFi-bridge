@@ -6,6 +6,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-10-27
+
+### Fixed
+
+- The firmware builds from a standalone clone placed next to an lwIP-CE
+  checkout, not only from lwIP-CE's `wifi_bridge` submodule.
+
 ## [1.0.0] - 2026-10-27
 
 ### Added
@@ -14,5 +21,6 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   [lwIP-CE](https://github.com/cagscalclabs/lwip-ce).
 - Bridge board hardware: KiCad project, fabrication files and enclosure.
 
-[Unreleased]: https://github.com/alessiodam/lwIP-CE-WiFi-bridge/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/alessiodam/lwIP-CE-WiFi-bridge/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/alessiodam/lwIP-CE-WiFi-bridge/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/alessiodam/lwIP-CE-WiFi-bridge/releases/tag/v1.0.0

@@ -35,9 +35,6 @@ jobs:
           path: lwip-ce
           sparse-checkout: src/wireless
 
-      - name: Link the lwIP-CE protocol headers
-        run: ln -s lwip-ce/src src
-
       - name: Cache the component manager downloads
         uses: actions/cache@v6
         with:
