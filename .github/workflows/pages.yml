@@ -1,0 +1,53 @@
+name: Pages
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Collect the released firmware
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          out=site/firmware
+          mkdir -p "$out"
+          gh api --paginate "repos/$GH_REPO/releases" \
+            --jq '.[] | select(.draft | not) | {tag: .tag_name, prerelease} + (.assets[] | select(.name | test("^lwip_wifi_bridge-esp32s3-.*-merged\\.bin$")) | {file: .name})' \
+            | jq -s . > releases.json
+          jq -r '.[].tag | ltrimstr("v")' releases.json | xargs -r npx --yes semver@7.7.2 | tac | while read -r version; do
+            jq -c --arg tag "v$version" ".[] | select(.tag == \$tag)" releases.json
+          done | jq -s . > "$out/releases.json"
+          jq -r '.[] | [.tag, .file] | @tsv' "$out/releases.json" | while IFS=$'\t' read -r tag file; do
+            gh release download "$tag" -p "$file" -D "$out"
+          done
+          cat "$out/releases.json"
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

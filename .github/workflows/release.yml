@@ -77,12 +77,10 @@ jobs:
             --notes-file notes.md \
             dist/*/lwip_wifi_bridge-*
 
-      - name: Rebuild the lwIP-CE flasher
-        env:
-          GH_TOKEN: ${{ secrets.LWIP_CE_TOKEN }}
-        run: |
-          if [ -z "$GH_TOKEN" ]; then
-            echo "::notice::LWIP_CE_TOKEN is not set, so the lwIP-CE flasher picks this release up on its next Pages deploy"
-            exit 0
-          fi
-          gh workflow run pages.yml -R cagscalclabs/lwip-ce --ref master
+  pages:
+    needs: publish
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/pages.yml
