@@ -1,0 +1,64 @@
+name: Version
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+    outputs:
+      version:
+        value: ${{ jobs.semver.outputs.version }}
+      prerelease:
+        value: ${{ jobs.semver.outputs.prerelease }}
+
+permissions:
+  contents: read
+
+jobs:
+  semver:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+      prerelease: ${{ steps.read.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Validate version.txt
+        id: read
+        run: |
+          version=$(cat version.txt)
+          if ! grep -qP '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$' <<< "$version"; then
+            echo "::error file=version.txt::'$version' is not a SemVer 2.0.0 version"
+            exit 1
+          fi
+          core=${version%%+*}
+          prerelease=false
+          if [[ $core == *-* ]]; then prerelease=true; fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
+      - name: Check the changelog
+        env:
+          VERSION: ${{ steps.read.outputs.version }}
+        run: |
+          if ! grep -qF "## [$VERSION]" CHANGELOG.md; then
+            echo "::error file=CHANGELOG.md::No '## [$VERSION]' section"
+            exit 1
+          fi
+
+      - name: Check the version was bumped
+        if: github.event_name == 'pull_request'
+        env:
+          VERSION: ${{ steps.read.outputs.version }}
+          BASE: origin/${{ github.base_ref }}
+        run: |
+          if git diff --quiet "$BASE...HEAD" -- . ':!.github' ':!*.md'; then
+            exit 0
+          fi
+          base=$(git show "$BASE:version.txt" 2>/dev/null) || exit 0
+          if ! npx --yes semver@7.7.2 -p -r ">$base" "$VERSION" > /dev/null; then
+            echo "::error file=version.txt::Changes outside .github/ and Markdown need a version above $base"
+            exit 1
+          fi

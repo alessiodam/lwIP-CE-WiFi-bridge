@@ -1,0 +1,88 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths: [version.txt]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  version:
+    uses: ./.github/workflows/version.yml
+
+  check:
+    needs: version
+    runs-on: ubuntu-latest
+    outputs:
+      released: ${{ steps.check.outputs.released }}
+    steps:
+      - name: Check for an existing release
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: v${{ needs.version.outputs.version }}
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "::notice::$TAG is already released"
+            echo "released=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  firmware:
+    needs: check
+    if: needs.check.outputs.released == 'false'
+    uses: ./.github/workflows/build.yml
+
+  hardware:
+    needs: check
+    if: needs.check.outputs.released == 'false'
+    uses: ./.github/workflows/hardware.yml
+
+  publish:
+    needs: [version, firmware, hardware]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: lwip-wifi-bridge-*
+          path: dist
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.version.outputs.version }}
+          PRERELEASE: ${{ needs.version.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          awk -v head="## [$VERSION]" 'index($0, head) == 1 { on = 1; next } on && /^## \[/ { exit } on && !/^\[[^]]+\]: / { print }' CHANGELOG.md > notes.md
+          flags=()
+          if [ "$PRERELEASE" = true ]; then flags+=(--prerelease); fi
+          gh release create "v$VERSION" "${flags[@]}" \
+            --target "$GITHUB_SHA" \
+            --title "v$VERSION" \
+            --notes-file notes.md \
+            dist/*/lwip_wifi_bridge-*
+
+      - name: Rebuild the lwIP-CE flasher
+        env:
+          GH_TOKEN: ${{ secrets.LWIP_CE_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::notice::LWIP_CE_TOKEN is not set, so the lwIP-CE flasher picks this release up on its next Pages deploy"
+            exit 0
+          fi
+          gh workflow run pages.yml -R cagscalclabs/lwip-ce --ref master

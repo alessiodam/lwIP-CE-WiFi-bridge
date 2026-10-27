@@ -1,0 +1,59 @@
+name: Hardware
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'hardware/**'
+      - 'version.txt'
+      - '.github/workflows/hardware.yml'
+  pull_request:
+    paths:
+      - 'hardware/**'
+      - 'version.txt'
+      - '.github/workflows/hardware.yml'
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  kicad:
+    runs-on: ubuntu-latest
+    container:
+      image: kicad/kicad:10.0
+      options: --user root
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Electrical rules check
+        working-directory: hardware/kicad
+        run: kicad-cli sch erc --severity-error --exit-code-violations -o erc.rpt wifi_bridge_s3.kicad_sch
+
+      - name: Design rules check
+        working-directory: hardware/kicad
+        run: kicad-cli pcb drc --severity-error --schematic-parity --exit-code-violations -o drc.rpt wifi_bridge_s3.kicad_pcb
+
+      - name: Export the fabrication files
+        run: |
+          set -euo pipefail
+          version=$(cat version.txt)
+          name="lwip_wifi_bridge-hardware-${version}"
+          pcb=hardware/kicad/wifi_bridge_s3.kicad_pcb
+          mkdir -p dist gerbers
+          kicad-cli pcb export gerbers -o gerbers/ "$pcb"
+          kicad-cli pcb export drill -o gerbers/ "$pcb"
+          (cd gerbers && python3 -m zipfile -c "../dist/${name}-gerbers.zip" ./*)
+          kicad-cli sch export pdf -o "dist/${name}-schematic.pdf" hardware/kicad/wifi_bridge_s3.kicad_sch
+          cp hardware/fab/bom.csv "dist/${name}-bom.csv"
+          cp hardware/fab/cpl.csv "dist/${name}-cpl.csv"
+          cp hardware/fab/wifi_bridge_s3.step "dist/${name}.step"
+          cp hardware/kicad/erc.rpt hardware/kicad/drc.rpt dist/
+          ls -l dist
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: lwip-wifi-bridge-hardware
+          path: dist/*
+          if-no-files-found: error

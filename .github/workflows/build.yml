@@ -1,0 +1,92 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  firmware:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [esp32s3]
+    env:
+      IDF_TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: wifi_bridge
+
+      - name: Load pinned versions
+        id: ci
+        run: grep -E '^[A-Z_]+=' wifi_bridge/.github/ci-versions.env >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
+        with:
+          repository: cagscalclabs/lwip-ce
+          ref: ${{ steps.ci.outputs.LWIP_CE_REF }}
+          path: lwip-ce
+          sparse-checkout: src/wireless
+
+      - name: Link the lwIP-CE protocol headers
+        run: ln -s lwip-ce/src src
+
+      - name: Cache the component manager downloads
+        uses: actions/cache@v6
+        with:
+          path: wifi_bridge/.idf-component-cache
+          key: idf-components-${{ matrix.target }}-${{ steps.ci.outputs.IDF_VERSION }}-${{ hashFiles('wifi_bridge/main/idf_component.yml', format('wifi_bridge/dependencies.lock.{0}', matrix.target)) }}
+          restore-keys: idf-components-${{ matrix.target }}-${{ steps.ci.outputs.IDF_VERSION }}-
+
+      - name: Build the firmware
+        uses: espressif/esp-idf-ci-action@v1.2.0
+        env:
+          IDF_COMPONENT_CACHE_PATH: ${{ github.workspace }}/wifi_bridge/.idf-component-cache
+        with:
+          esp_idf_version: ${{ steps.ci.outputs.IDF_VERSION }}
+          target: ${{ env.IDF_TARGET }}
+          path: wifi_bridge
+          command: idf.py build && idf.py merge-bin -o lwip_wifi_bridge-merged.bin
+
+      - name: Collect the artifacts
+        run: |
+          set -euo pipefail
+          version=$(cat wifi_bridge/version.txt)
+          build=wifi_bridge/build
+          mkdir -p dist
+          cp "$build/lwip_wifi_bridge.bin" "dist/lwip_wifi_bridge-${IDF_TARGET}-${version}.bin"
+          cp "$build/lwip_wifi_bridge.elf" "dist/lwip_wifi_bridge-${IDF_TARGET}-${version}.elf"
+          cp "$(find wifi_bridge -name lwip_wifi_bridge-merged.bin -print -quit)" "dist/lwip_wifi_bridge-${IDF_TARGET}-${version}-merged.bin"
+          cp "$build/bootloader/bootloader.bin" dist/bootloader.bin
+          cp "$build/partition_table/partition-table.bin" dist/partition-table.bin
+          cp "$build/flasher_args.json" dist/flasher_args.json
+          ls -l dist
+
+      - name: Publish the job summary
+        run: |
+          {
+            echo "## lwIP-CE Wi-Fi bridge $(cat wifi_bridge/version.txt)"
+            echo
+            echo "target \`${IDF_TARGET}\`, ESP-IDF \`${{ steps.ci.outputs.IDF_VERSION }}\`, lwIP-CE \`${{ steps.ci.outputs.LWIP_CE_REF }}\`"
+            echo
+            echo "| artifact | bytes |"
+            echo "| --- | --- |"
+            for f in dist/*; do
+              echo "| \`$(basename "$f")\` | $(stat -c%s "$f") |"
+            done
+            echo
+            echo "Flash: \`esptool.py --chip ${IDF_TARGET} write_flash 0x0 lwip_wifi_bridge-${IDF_TARGET}-*-merged.bin\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: lwip-wifi-bridge-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error

@@ -1,0 +1,64 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '17 4 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  versions:
+    runs-on: ubuntu-latest
+    outputs:
+      IDF_VERSION: ${{ steps.ci.outputs.IDF_VERSION }}
+      LWIP_CE_REF: ${{ steps.ci.outputs.LWIP_CE_REF }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Load pinned versions
+        id: ci
+        run: grep -E '^[A-Z_]+=' .github/ci-versions.env >> "$GITHUB_OUTPUT"
+
+  analyze:
+    needs: versions
+    runs-on: ubuntu-latest
+    container: espressif/idf:${{ needs.versions.outputs.IDF_VERSION }}
+    permissions:
+      contents: read
+      security-events: write
+    env:
+      IDF_CCACHE_ENABLE: 0
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: wifi_bridge
+
+      - uses: actions/checkout@v7
+        with:
+          repository: cagscalclabs/lwip-ce
+          ref: ${{ needs.versions.outputs.LWIP_CE_REF }}
+          path: lwip-ce
+          sparse-checkout: src/wireless
+
+      - name: Link the lwIP-CE protocol headers
+        run: ln -s lwip-ce/src src
+
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: c-cpp
+          build-mode: manual
+          source-root: wifi_bridge
+
+      - name: Build the firmware
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          idf.py -C wifi_bridge set-target esp32s3 build
+
+      - uses: github/codeql-action/analyze@v4
+        with:
+          checkout_path: ${{ github.workspace }}/wifi_bridge
