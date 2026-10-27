@@ -33,6 +33,7 @@ jobs:
             gh release download "$tag" -p "$file" -D "$out"
           done
           cat "$out/releases.json"
+          printf '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=https://cagscalclabs.github.io/lwip-ce/flasher.html"><title>lwIP-CE Wi-Fi bridge</title><a href="https://cagscalclabs.github.io/lwip-ce/flasher.html">lwIP-CE Wi-Fi bridge flasher</a>\n' > site/index.html
 
       - uses: actions/upload-pages-artifact@v5
         with:
