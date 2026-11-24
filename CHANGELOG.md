@@ -6,6 +6,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-11-24
+
+### Changed
+
+- Frames to and from the calculator carry a 2-byte big-endian length prefix,
+  so hosts whose ACM drivers merge or split USB transfers (macOS) can find
+  frame boundaries. Calculators need an lwIP-CE build with matching framing.
+
 ## [1.1.0] - 2026-11-23
 
 ### Added
@@ -27,7 +35,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   [lwIP-CE](https://github.com/cagscalclabs/lwip-ce).
 - Bridge board hardware: KiCad project, fabrication files and enclosure.
 
-[Unreleased]: https://github.com/alessiodam/lwIP-CE-WiFi-bridge/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/alessiodam/lwIP-CE-WiFi-bridge/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/alessiodam/lwIP-CE-WiFi-bridge/compare/v1.1.0...v2.0.0
 [1.1.0]: https://github.com/alessiodam/lwIP-CE-WiFi-bridge/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/alessiodam/lwIP-CE-WiFi-bridge/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/alessiodam/lwIP-CE-WiFi-bridge/releases/tag/v1.0.0

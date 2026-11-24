@@ -32,6 +32,11 @@ typedef struct {
     uint8_t data[];
 } frame_t;
 
+/* Reassembly state for RX from the calculator (length-prefixed framing). */
+static uint8_t s_rx_buf[FRAME_MAX];
+static uint16_t s_rx_pos;  /* bytes accumulated so far */
+static uint16_t s_rx_len;  /* declared frame length (0 = waiting for 2-byte header) */
+
 static QueueHandle_t s_tx_queue;
 static SemaphoreHandle_t s_cdc_lock;
 static SemaphoreHandle_t s_attach;
@@ -144,7 +149,10 @@ static void log_dhcp(const char *dir, const uint8_t *frame, size_t length)
 
 void bridge_send(const uint8_t *data, size_t length)
 {
-    size_t padded = length % USB_MPS == 0 ? length + 1 : length;
+    /* 2-byte length prefix + payload; pad to avoid a zero-length terminator
+     * on MPS-aligned transfers. */
+    size_t wire = 2 + length;
+    size_t padded = wire % USB_MPS == 0 ? wire + 1 : wire;
     frame_t *frame;
 
     if (s_cdc == NULL || length < FRAME_MIN || length > FRAME_MAX) {
@@ -155,9 +163,11 @@ void bridge_send(const uint8_t *data, size_t length)
         return;
     }
     frame->length = (uint16_t)padded;
-    memcpy(frame->data, data, length);
-    if (padded != length) {
-        frame->data[length] = 0;
+    frame->data[0] = (uint8_t)(length >> 8);
+    frame->data[1] = (uint8_t)(length & 0xFF);
+    memcpy(frame->data + 2, data, length);
+    if (padded != wire) {
+        frame->data[wire] = 0;
     }
     if (xQueueSend(s_tx_queue, &frame, 0) != pdTRUE) {
         free(frame);
@@ -183,18 +193,11 @@ static esp_err_t wifi_rx(void *buffer, uint16_t length, void *eb)
     return ESP_OK;
 }
 
-static bool cdc_data(const uint8_t *data, size_t length, void *arg)
+static void dispatch_frame(const uint8_t *data, size_t length)
 {
-    (void)arg;
-
-    if (length < FRAME_MIN || length > FRAME_MAX) {
-        ESP_LOGW(TAG, "dropping %u byte frame from calculator", (unsigned)length);
-        return true;
-    }
-
     if (((data[12] << 8) | data[13]) == CTL_ETHERTYPE) {
         control_request(data, length);
-        return true;
+        return;
     }
 
     log_ping(data, length);
@@ -215,7 +218,43 @@ static bool cdc_data(const uint8_t *data, size_t length, void *arg)
         ESP_LOGW(TAG, "dropped %u byte frame from calculator: Wi-Fi down", (unsigned)length);
     }
 #endif
+}
 
+static bool cdc_data(const uint8_t *data, size_t length, void *arg)
+{
+    (void)arg;
+
+    for (size_t i = 0; i < length; ) {
+        if (s_rx_len == 0) {
+            /* Waiting for the 2-byte length header. */
+            size_t need = (size_t)(2 - s_rx_pos);
+            size_t take = need < length - i ? need : length - i;
+            memcpy(s_rx_buf + s_rx_pos, data + i, take);
+            s_rx_pos += (uint16_t)take;
+            i += take;
+            if (s_rx_pos < 2)
+                break;
+            s_rx_len = (uint16_t)((s_rx_buf[0] << 8) | s_rx_buf[1]);
+            s_rx_pos = 0;
+            if (s_rx_len < FRAME_MIN || s_rx_len > FRAME_MAX) {
+                ESP_LOGW(TAG, "bad frame length %u from calculator, dropping", s_rx_len);
+                s_rx_len = 0;
+                return true;
+            }
+        } else {
+            /* Accumulating frame payload. */
+            size_t need = (size_t)(s_rx_len - s_rx_pos);
+            size_t take = need < length - i ? need : length - i;
+            memcpy(s_rx_buf + s_rx_pos, data + i, take);
+            s_rx_pos += (uint16_t)take;
+            i += take;
+            if (s_rx_pos == s_rx_len) {
+                dispatch_frame(s_rx_buf, s_rx_len);
+                s_rx_len = 0;
+                s_rx_pos = 0;
+            }
+        }
+    }
     return true;
 }
 
@@ -232,6 +271,8 @@ static void cdc_event(const cdc_acm_host_dev_event_data_t *event, void *arg)
         xSemaphoreGive(s_cdc_lock);
         cdc_acm_host_close(event->data.cdc_hdl);
         drop_queued();
+        s_rx_pos = 0;
+        s_rx_len = 0;
         ESP_LOGI(TAG, "calculator detached");
         break;
 
